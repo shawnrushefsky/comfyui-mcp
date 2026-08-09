@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile, readdir } from "fs/promises";
 import { existsSync } from "fs";
 import { join, basename } from "path";
 import { homedir } from "os";
+import { safeFetch } from "../utils/safe-fetch.js";
 
 // Font cache directory
 const FONTS_DIR = join(homedir(), ".comfyui-mcp", "fonts");
@@ -86,7 +87,7 @@ async function downloadFromGoogle(
     const cssUrl = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(family)}:wght@${weight}&display=swap`;
 
     // Fetch CSS with Chrome user agent to get woff2
-    const cssResponse = await fetch(cssUrl, {
+    const cssResponse = await safeFetch(cssUrl, {
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -125,7 +126,7 @@ async function downloadFromGoogle(
     }
 
     // Download the font file
-    const fontResponse = await fetch(fontUrl);
+    const fontResponse = await safeFetch(fontUrl);
     if (!fontResponse.ok) {
       return {
         success: false,
@@ -178,7 +179,7 @@ async function downloadFromUrl(
   name: string
 ): Promise<DownloadFontResult> {
   try {
-    const response = await fetch(url);
+    const response = await safeFetch(url);
     if (!response.ok) {
       return {
         success: false,

@@ -110,6 +110,7 @@ import {
   GetDownloadUrlInput,
 } from "./tools/examples/index.js";
 import { readFile } from "fs/promises";
+import { safeFetch } from "./utils/safe-fetch.js";
 import {
   getPromptingGuide,
   getComprehensiveGuide,
@@ -986,7 +987,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (source.startsWith("http://") || source.startsWith("https://")) {
           // Fetch from URL
           try {
-            const response = await fetch(source);
+            const response = await safeFetch(source);
             if (!response.ok) {
               return {
                 content: [{ type: "text", text: `Failed to fetch image: ${response.status} ${response.statusText}` }],

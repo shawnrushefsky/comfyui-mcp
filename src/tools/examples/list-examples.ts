@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ExampleWorkflow, ModelDownload } from "./types.js";
 import { EXAMPLE_WORKFLOWS } from "./data.js";
+import { safeFetch } from "../../utils/safe-fetch.js";
 
 /**
  * Extract workflow JSON from PNG metadata
@@ -115,7 +116,7 @@ export async function fetchExampleWorkflow(
   error?: string;
 }> {
   try {
-    const response = await fetch(imageUrl);
+    const response = await safeFetch(imageUrl);
     if (!response.ok) {
       return { success: false, error: `Failed to fetch: ${response.statusText}` };
     }
@@ -151,7 +152,7 @@ export async function fetchJsonWorkflow(
   error?: string;
 }> {
   try {
-    const response = await fetch(jsonUrl);
+    const response = await safeFetch(jsonUrl);
     if (!response.ok) {
       return { success: false, error: `Failed to fetch: ${response.statusText}` };
     }
