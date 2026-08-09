@@ -2,6 +2,16 @@ import { z } from "zod";
 import { ExampleWorkflow, ModelDownload } from "./types.js";
 import { EXAMPLE_WORKFLOWS } from "./data.js";
 
+// Refuse to even attempt parsing implausibly large "PNG" data. Without
+// this, a URL-fetching caller (extract_workflow, fetchExampleWorkflow) that
+// hits a malicious/misbehaving server with a huge response body would carry
+// that entire body through TextDecoder + JSON.parse below.
+const MAX_PNG_SIZE = 50 * 1024 * 1024; // 50MB - generous for a real PNG
+
+// workflow/prompt metadata is normally KB-sized JSON; cap what we'll
+// attempt to JSON.parse so a crafted chunk can't force a huge parse/alloc.
+const MAX_TEXT_VALUE_SIZE = 20 * 1024 * 1024; // 20MB
+
 /**
  * Extract workflow JSON from PNG metadata
  * ComfyUI embeds workflow data in PNG tEXt chunks with key "workflow" or "prompt"
@@ -9,6 +19,10 @@ import { EXAMPLE_WORKFLOWS } from "./data.js";
 export async function extractWorkflowFromPng(
   imageData: ArrayBuffer
 ): Promise<{ workflow?: Record<string, unknown>; prompt?: Record<string, unknown> } | null> {
+  if (imageData.byteLength > MAX_PNG_SIZE) {
+    return null;
+  }
+
   const data = new Uint8Array(imageData);
 
   // PNG signature check
@@ -21,15 +35,19 @@ export async function extractWorkflowFromPng(
 
   const result: { workflow?: Record<string, unknown>; prompt?: Record<string, unknown> } = {};
 
-  // Parse PNG chunks
+  // Parse PNG chunks. Every declared length is untrusted input from the
+  // file itself, so it's validated against what's actually left in the
+  // buffer before being used to slice - a corrupt or crafted file could
+  // otherwise declare a length far past the end of the data.
   let offset = 8;
-  while (offset < data.length) {
-    // Read chunk length (4 bytes, big-endian)
+  while (offset + 8 <= data.length) {
+    // Read chunk length (4 bytes, big-endian, unsigned)
     const length =
-      (data[offset] << 24) |
-      (data[offset + 1] << 16) |
-      (data[offset + 2] << 8) |
-      data[offset + 3];
+      ((data[offset] << 24) |
+        (data[offset + 1] << 16) |
+        (data[offset + 2] << 8) |
+        data[offset + 3]) >>>
+      0;
     offset += 4;
 
     // Read chunk type (4 bytes)
@@ -40,6 +58,12 @@ export async function extractWorkflowFromPng(
       data[offset + 3]
     );
     offset += 4;
+
+    // A declared length that runs past the end of the buffer means the
+    // file is malformed or hostile - stop parsing rather than trusting it.
+    if (length > data.length - offset) {
+      break;
+    }
 
     // Read chunk data
     const chunkData = data.slice(offset, offset + length);
@@ -80,7 +104,7 @@ export async function extractWorkflowFromPng(
       }
 
       // Parse workflow or prompt JSON
-      if (key === "workflow" || key === "prompt") {
+      if ((key === "workflow" || key === "prompt") && value.length <= MAX_TEXT_VALUE_SIZE) {
         try {
           const parsed = JSON.parse(value);
           if (key === "workflow") {
