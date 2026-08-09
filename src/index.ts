@@ -109,7 +109,7 @@ import {
   DeleteTemplateInput,
   GetDownloadUrlInput,
 } from "./tools/examples/index.js";
-import { readFile } from "fs/promises";
+import { readFile, stat } from "fs/promises";
 import {
   getPromptingGuide,
   getComprehensiveGuide,
@@ -162,6 +162,15 @@ import {
 
 // Server context - single source of truth for all state
 let ctx: ServerContext;
+
+// extract_workflow's local-file branch reads whatever path it's given with
+// no directory sandboxing, since users legitimately point it at PNGs
+// anywhere on disk (Downloads, ComfyUI's output folder, etc.). Restricting
+// it to a .png extension and this size cap narrows that from "read any
+// file the process can access" down to "read a PNG-sized PNG", closing off
+// the realistic path to exfiltrating unrelated sensitive files (dotfiles,
+// keys, .env) through this tool.
+const MAX_LOCAL_IMAGE_BYTES = 50 * 1024 * 1024; // 50MB
 
 const server = new Server(
   {
@@ -1002,7 +1011,26 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           }
         } else {
           // Read from local file
+          if (!/\.png$/i.test(source)) {
+            return {
+              content: [{ type: "text", text: "Local file source must be a .png file" }],
+              isError: true,
+            };
+          }
           try {
+            const stats = await stat(source);
+            if (!stats.isFile()) {
+              return {
+                content: [{ type: "text", text: `Not a file: ${source}` }],
+                isError: true,
+              };
+            }
+            if (stats.size > MAX_LOCAL_IMAGE_BYTES) {
+              return {
+                content: [{ type: "text", text: `File too large (${stats.size} bytes, max ${MAX_LOCAL_IMAGE_BYTES})` }],
+                isError: true,
+              };
+            }
             const buffer = await readFile(source);
             imageData = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
           } catch (err) {
