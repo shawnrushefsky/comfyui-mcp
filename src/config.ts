@@ -1,6 +1,6 @@
 import { homedir } from "os";
 import { join } from "path";
-import { readFile, writeFile, mkdir } from "fs/promises";
+import { readFile, writeFile, mkdir, chmod } from "fs/promises";
 import { existsSync } from "fs";
 
 export interface ComfyUIConfig {
@@ -79,10 +79,21 @@ export async function saveConfig(config: Config): Promise<void> {
   const configPath = getConfigPath();
 
   if (!existsSync(configDir)) {
-    await mkdir(configDir, { recursive: true });
+    await mkdir(configDir, { recursive: true, mode: 0o700 });
   }
 
   await writeFile(configPath, JSON.stringify(config, null, 2), "utf-8");
+
+  // config.json can hold comfyui.apiKey, sent as a bearer token - restrict
+  // it to the owner. writeFile's own `mode` option only applies when the
+  // file is newly created, so chmod explicitly here to also cover the
+  // update-an-existing-file case. Best-effort: chmod's mode bits are
+  // largely a no-op on Windows, so this mainly hardens macOS/Linux.
+  try {
+    await chmod(configPath, 0o600);
+  } catch {
+    // Non-fatal - config was still written successfully.
+  }
 }
 
 export function getConfigDir_(): string {
