@@ -23,6 +23,41 @@ export interface RenderSvgResult {
   error?: string;
 }
 
+// Matches href / xlink:href values that point at an external or local
+// resource rather than an in-document fragment (#id) or a self-contained
+// data: URI.
+const EXTERNAL_HREF_PATTERN = /^\s*(?:https?|file|ftp):/i;
+
+/**
+ * Strip constructs that let SVG markup reach outside the document it came
+ * in: <image>/<use>/<script>/<foreignObject> href targets pointing at a
+ * remote URL or local file get rasterized (or executed) by the renderer,
+ * turning caller-supplied SVG into an SSRF or local-file-read primitive -
+ * the referenced content ends up embedded in the output PNG, which is
+ * uploaded to ComfyUI and can flow back to the caller. This is deliberately
+ * conservative: fragment references (#id) and data: URIs are left alone
+ * since they're self-contained and cover the legitimate embedding cases.
+ */
+function sanitizeSvg(svg: string): string {
+  let sanitized = svg;
+
+  sanitized = sanitized.replace(/<script[\s\S]*?<\/script\s*>/gi, "");
+  sanitized = sanitized.replace(/<foreignObject[\s\S]*?<\/foreignObject\s*>/gi, "");
+
+  sanitized = sanitized.replace(
+    /((?:xlink:)?href\s*=\s*)("([^"]*)"|'([^']*)')/gi,
+    (match, prefix, _quoted, dq, sq) => {
+      const value = dq ?? sq ?? "";
+      if (EXTERNAL_HREF_PATTERN.test(value)) {
+        return `${prefix}""`;
+      }
+      return match;
+    }
+  );
+
+  return sanitized;
+}
+
 /**
  * Render SVG to PNG buffer for upload to ComfyUI.
  * Returns the buffer and filename for use with uploadImage API.
@@ -37,7 +72,7 @@ export async function renderSvg(
     const outputFilename = `${filename}.png`;
 
     // Parse and modify SVG to ensure proper dimensions
-    let svgContent = input.svg;
+    let svgContent = sanitizeSvg(input.svg);
 
     // Embed fonts if specified
     if (input.fonts && input.fonts.length > 0) {
